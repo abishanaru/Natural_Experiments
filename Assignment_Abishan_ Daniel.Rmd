@@ -32,19 +32,6 @@ data$points_away <- ifelse(data$result == "A", 3, ifelse(data$result == "D", 1, 
 
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## Analysis
 ### Abishan
 
