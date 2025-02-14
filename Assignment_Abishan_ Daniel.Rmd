@@ -15,7 +15,20 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(readr)
 premier_league <- read_csv("premier league.csv")
+data <- read.csv("results.csv")
+
 ```
 
 ## Data Cleaning
+```{r}
+# Tordifferenz berechnen
+data$goal_difference <- data$home_goals - data$away_goals
+
+# Punkte für das Heimteam berechnen (3 für Sieg, 1 für Unentschieden, 0 für Niederlage)
+data$points_home <- ifelse(data$result == "H", 3, ifelse(data$result == "D", 1, 0))
+
+# Punkte für das Auswärtsteam berechnen (3 für Sieg, 1 für Unentschieden, 0 für Niederlage)
+data$points_away <- ifelse(data$result == "A", 3, ifelse(data$result == "D", 1, 0))
+
+```
 
