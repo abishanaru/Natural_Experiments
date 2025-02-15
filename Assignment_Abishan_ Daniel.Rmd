@@ -14,8 +14,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Importing Data
 ```{r}
 library(readr)
-premier_league <- read_csv("premier league.csv")
 data <- read.csv("results.csv")
+library(readxl)
+attendance <- read_excel("C:/DB/01 HSLU/01 Semester/Natural Experiments Using R/_PROJECT/Attendance.xlsx")
 
 ```
 
@@ -30,10 +31,172 @@ data$points_home <- ifelse(data$result == "H", 3, ifelse(data$result == "D", 1, 
 # Punkte für das Auswärtsteam berechnen (3 für Sieg, 1 für Unentschieden, 0 für Niederlage)
 data$points_away <- ifelse(data$result == "A", 3, ifelse(data$result == "D", 1, 0))
 
+library(dplyr)
+
+attendance <- attendance %>%
+  rename(
+    season = Saison,
+    team = Team,
+    average_attendance = `Average Attendance`
+  )
+
+data <- data %>%
+  left_join(attendance, 
+            by = c("season" = "season", 
+                   "home_team" = "team")) %>%
+  rename(home_average_attendance = average_attendance)
+
 ```
+
 
 ## Analysis
 ### Abishan
 
 
 ### Daniel
+## Analysis home advantage over all seasons
+
+```{r}
+library(dplyr)
+
+data_summary <- data %>%
+  group_by(season) %>%
+  summarise(
+    total_matches = n(),
+    home_wins     = sum(result == "H"),
+    draws         = sum(result == "D"),
+    away_wins     = sum(result == "A"),
+    # Durchschnittliche Home-Attendance (NA-Werte ignorieren)
+    avg_home_attendance = mean(home_average_attendance, na.rm = TRUE)
+  ) %>%
+  mutate(
+    pct_home_wins = 100 * home_wins / total_matches,
+    pct_draws     = 100 * draws / total_matches,
+    pct_away_wins = 100 * away_wins / total_matches
+  )
+
+data_summary
+
+
+
+```
+
+
+## Analysis home advantage for high and low attendancies
+
+```{r}
+library(dplyr)
+
+# 1) Alle Einträge mit Attendance > 60000
+att_over_50000 <- data %>%
+  filter(home_average_attendance > 50000)
+
+# 2) Alle Einträge mit Attendance < 20000
+att_under_22000 <- data %>%
+  filter(home_average_attendance < 22000)
+
+
+# 1) Zusammenfassung für Spiele mit Attendance > 50000
+att_over_50000_summary <- att_over_50000 %>%
+  summarise(
+    total_matches = n(),
+    home_wins     = sum(result == "H"),
+    draws         = sum(result == "D"),
+    away_wins     = sum(result == "A")
+  ) %>%
+  mutate(
+    pct_home_wins = 100 * home_wins / total_matches,
+    pct_draws     = 100 * draws     / total_matches,
+    pct_away_wins = 100 * away_wins / total_matches
+  )
+
+# 2) Zusammenfassung für Spiele mit Attendance < 22000
+att_under_22000_summary <- att_under_22000 %>%
+  summarise(
+    total_matches = n(),
+    home_wins     = sum(result == "H"),
+    draws         = sum(result == "D"),
+    away_wins     = sum(result == "A")
+  ) %>%
+  mutate(
+    pct_home_wins = 100 * home_wins / total_matches,
+    pct_draws     = 100 * draws     / total_matches,
+    pct_away_wins = 100 * away_wins / total_matches
+  )
+
+att_over_50000_summary
+att_under_22000_summary
+
+
+```
+
+
+## Korrelation mit dem Torverhältnis und Punktedifferenz
+```{r}
+# Beispiel: Korrelation zwischen Tor-Differenz und Attendance
+cor(data$home_goals - data$away_goals, data$home_average_attendance, use = "complete.obs")
+
+# Oder z.B. Korrelation zwischen Heim-Punkten und Attendance
+cor(data$points_home, data$home_average_attendance, use = "complete.obs")
+
+```
+
+## Gruppierte Auswertung nach Attendancies
+```{r}
+library(dplyr)
+
+data %>%
+  mutate(
+    attendance_group = case_when(
+      home_average_attendance < 25000 ~ "<25k",
+      home_average_attendance < 35000 ~ "25k-35k",
+      home_average_attendance < 50000 ~ "35k-50k",
+      TRUE                            ~ ">50k"
+    )
+  ) %>%
+  group_by(attendance_group) %>%
+  summarise(
+    total_matches = n(),
+    avg_goal_diff = mean(home_goals - away_goals, na.rm = TRUE),
+    pct_home_wins = mean(result == "H", na.rm = TRUE) * 100
+  )
+
+```
+
+## Regressionsansatz - Heimsieg als Binärvariable
+```{r}
+# Erstelle eine Binärvariable: Hwin = 1 bei Heimsieg, sonst 0
+data <- data %>%
+  mutate(Hwin = if_else(result == "H", 1, 0))
+
+# Logistisches Modell
+mod_logit <- glm(Hwin ~ home_average_attendance,
+                 data = data,
+                 family = binomial(link = "logit"))
+
+summary(mod_logit)
+
+```
+## Visualisierung
+```{r}
+library(ggplot2)
+
+ggplot(data, aes(x = home_average_attendance, 
+                 y = home_goals - away_goals)) +
+  geom_point(alpha = 0.3) +    # Punkte (leicht transparent)
+  geom_smooth(method = "lm") + # Gerade (lineares Modell)
+  labs(x = "Home Attendance", y = "Goal Difference (Home - Away)")
+
+data %>%
+  mutate(attendance_group = case_when(
+    home_average_attendance < 20000 ~ "<20k",
+    home_average_attendance < 40000 ~ "20k-40k",
+    home_average_attendance < 60000 ~ "40k-60k",
+    TRUE ~ ">60k"
+  )) %>%
+  ggplot(aes(x = attendance_group, y = home_goals - away_goals)) +
+  geom_boxplot() +
+  labs(x = "Attendance Group", y = "Goal Difference")
+
+```
+
