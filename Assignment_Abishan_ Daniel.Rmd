@@ -51,7 +51,131 @@ data <- data %>%
 
 ## Analysis
 ### Abishan
+```{r}
+library(dplyr)
+library(tidyr)
 
+# Example: Reshape to long format
+data_long <- data %>%
+  mutate(match_id = row_number()) %>%  # ensure each row (match) has a unique ID
+  select(match_id, season, home_team, away_team, home_goals, away_goals, result) %>%
+  # Reshape so we get one row per "team match":
+  pivot_longer(
+    cols = c("home_team", "away_team"),
+    names_to = "home_away",
+    values_to = "team"
+  ) %>%
+  # For goals, we have to pivot the same way or join them carefully:
+  mutate(
+    goals_for = ifelse(home_away == "home_team", home_goals, away_goals),
+    goals_against = ifelse(home_away == "home_team", away_goals, home_goals),
+    # Compute match result from perspective of "team":
+    team_result = case_when(
+      goals_for > goals_against ~ "W",
+      goals_for < goals_against ~ "L",
+      TRUE                      ~ "D"
+    ),
+    home_away = ifelse(home_away == "home_team", "H", "A")
+  ) %>%
+  select(match_id, season, team, home_away, goals_for, goals_against, team_result)
+
+# Sort by season and match_id (assuming match_id is chronological; if not, use actual date)
+data_long <- data_long %>%
+  arrange(team, season, match_id)
+
+# Now, for each team, compute the 'win_streak_before_match':
+data_long <- data_long %>%
+  group_by(team) %>%
+  mutate(
+    # For each row, check if the previous match was a win, if so add 1, otherwise reset
+    win_streak_before = {
+      streak <- numeric(n())
+      streak[1] <- 0  # first match has no "before" streak
+      for(i in 2:n()) {
+        if(team_result[i-1] == "W") {
+          streak[i] <- streak[i-1] + 1
+        } else {
+          streak[i] <- 0
+        }
+      }
+      streak
+    },
+    # Similarly for a losing streak
+    lose_streak_before = {
+      streak <- numeric(n())
+      streak[1] <- 0
+      for(i in 2:n()) {
+        if(team_result[i-1] == "L") {
+          streak[i] <- streak[i-1] + 1
+        } else {
+          streak[i] <- 0
+        }
+      }
+      streak
+    }
+  ) %>%
+  ungroup()
+
+```
+```{r}
+library(ggplot2)
+
+ggplot(data_long, aes(x = win_streak_before)) +
+  geom_bar() +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Win Streaks Before a Match",
+    x = "Win Streak Length",
+    y = "Count"
+  )
+
+```
+
+```{r}
+data_long %>%
+  group_by(win_streak_before) %>%
+  summarise(prob_win = mean(team_result == "W")) %>%
+  ggplot(aes(x = win_streak_before, y = prob_win)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    title = "Win Probability vs. Previous Win Streak",
+    x = "Win Streak Before Current Match",
+    y = "Probability of Win (Current Match)"
+  )
+
+```
+
+
+```{r}
+# Create a binary outcome (1 if team_result == "W", 0 otherwise):
+data_long <- data_long %>%
+  mutate(win_current = ifelse(team_result == "W", 1, 0))
+
+# Fit a logistic regression predicting the odds of winning:
+model <- glm(
+  win_current ~ win_streak_before + lose_streak_before + home_away,
+  data = data_long,
+  family = binomial(link = "logit")
+)
+
+summary(model)
+
+```
+
+
+```{r}
+# Mixed model with random intercept by team:
+library(lme4)
+model_mixed <- glmer(
+  win_current ~ win_streak_before + home_away + (1 | team),
+  data = data_long,
+  family = binomial
+)
+summary(model_mixed)
+
+```
 
 ### Daniel
 ## Analysis home advantage over all seasons
