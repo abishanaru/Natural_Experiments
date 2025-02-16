@@ -77,74 +77,41 @@ data_summary <- data %>%
 
 data_summary
 
-
-
-```
-
-
-## Analysis home advantage for high and low attendancies
-
-```{r}
 library(dplyr)
+library(tidyr)
+library(ggplot2)
 
-# 1) Alle Einträge mit Attendance > 60000
-att_over_50000 <- data %>%
-  filter(home_average_attendance > 50000)
-
-# 2) Alle Einträge mit Attendance < 20000
-att_under_22000 <- data %>%
-  filter(home_average_attendance < 22000)
-
-
-# 1) Zusammenfassung für Spiele mit Attendance > 50000
-att_over_50000_summary <- att_over_50000 %>%
-  summarise(
-    total_matches = n(),
-    home_wins     = sum(result == "H"),
-    draws         = sum(result == "D"),
-    away_wins     = sum(result == "A")
-  ) %>%
-  mutate(
-    pct_home_wins = 100 * home_wins / total_matches,
-    pct_draws     = 100 * draws     / total_matches,
-    pct_away_wins = 100 * away_wins / total_matches
+# 1) Keep only the relevant columns and reshape the data to long format
+data_summary_long <- data_summary %>%
+  select(season, pct_home_wins, pct_draws, pct_away_wins) %>%
+  pivot_longer(
+    cols = c(pct_home_wins, pct_draws, pct_away_wins),
+    names_to = "outcome",
+    values_to = "pct"
   )
 
-# 2) Zusammenfassung für Spiele mit Attendance < 22000
-att_under_22000_summary <- att_under_22000 %>%
-  summarise(
-    total_matches = n(),
-    home_wins     = sum(result == "H"),
-    draws         = sum(result == "D"),
-    away_wins     = sum(result == "A")
-  ) %>%
-  mutate(
-    pct_home_wins = 100 * home_wins / total_matches,
-    pct_draws     = 100 * draws     / total_matches,
-    pct_away_wins = 100 * away_wins / total_matches
+# 2) Plot as a line chart
+ggplot(data_summary_long, aes(x = season, y = pct, color = outcome, group = outcome)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    x = "Season",
+    y = "Percentage",
+    color = "Outcome",
+    title = "Distribution of Match Outcomes by Season"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)  # tilt labels if needed
   )
 
-att_over_50000_summary
-att_under_22000_summary
-
 
 ```
 
-
-## Korrelation mit dem Torverhältnis und Punktedifferenz
-```{r}
-# Beispiel: Korrelation zwischen Tor-Differenz und Attendance
-cor(data$home_goals - data$away_goals, data$home_average_attendance, use = "complete.obs")
-
-# Oder z.B. Korrelation zwischen Heim-Punkten und Attendance
-cor(data$points_home, data$home_average_attendance, use = "complete.obs")
-
-```
-
-## Gruppierte Auswertung nach Attendancies
+## Grouped analysis by attendancies
 ```{r}
 library(dplyr)
-
+library(ggplot2)
 data %>%
   mutate(
     attendance_group = case_when(
@@ -161,15 +128,146 @@ data %>%
     pct_home_wins = mean(result == "H", na.rm = TRUE) * 100
   )
 
+
+# Create 'attendance_group', reorder its levels, summarize, and store results in 'data_summary'
+data_summary <- data %>%
+  mutate(
+    attendance_group = case_when(
+      home_average_attendance < 25000 ~ "<25k",
+      home_average_attendance < 35000 ~ "25k-35k",
+      home_average_attendance < 50000 ~ "35k-50k",
+      TRUE                            ~ ">50k"
+    )
+  ) %>%
+  # Reorder factor levels so they appear in the desired sequence
+  mutate(
+    attendance_group = factor(
+      attendance_group,
+      levels = c("<25k", "25k-35k", "35k-50k", ">50k")
+    )
+  ) %>%
+  # Summarize: count total matches, home wins, and compute home-win percentage
+  group_by(attendance_group) %>%
+  summarise(
+    total_matches = n(),
+    home_wins     = sum(result == "H", na.rm = TRUE),
+    pct_home_wins = 100 * home_wins / total_matches
+  )
+
+# Plot a bar chart of home-win percentage by attendance group
+ggplot(data_summary, aes(x = attendance_group, y = pct_home_wins)) +
+  geom_col(fill = "steelblue") +
+  labs(
+    x = "Attendance Group",
+    y = "Home Win Percentage",
+    title = "Home Win Percentage by Attendance Group"
+  ) +
+  theme_minimal()
+
+
 ```
 
-## Regressionsansatz - Heimsieg als Binärvariable
+## Correlation between goals/points with attendance
 ```{r}
-# Erstelle eine Binärvariable: Hwin = 1 bei Heimsieg, sonst 0
+# Correlation between goals with attendance
+cor(data$home_goals - data$away_goals, data$home_average_attendance, use = "complete.obs")
+
+# Correlation between points with attendance
+cor(data$points_home, data$home_average_attendance, use = "complete.obs")
+
+```
+## look for teams whos attendance changed drastically
+```{r}
+library(dplyr)
+
+df_changes <- data %>%
+  # 1) Group by team
+  group_by(home_team) %>%
+  # 2) Sort by season within each team
+  arrange(season, .by_group = TRUE) %>%
+  # 3) Compute attendance difference & percentage difference
+  mutate(
+    attendance_diff = home_average_attendance - lag(home_average_attendance),
+    attendance_diff_pct = (attendance_diff / lag(home_average_attendance)) * 100
+  ) %>%
+  # 4) Keep only rows with large (positive or negative) changes
+  filter(!is.na(attendance_diff)) %>%  # remove the first row per team (no lag)
+  filter(abs(attendance_diff_pct) > 15)
+
+# View the teams/seasons with “drastic” changes
+df_changes
+
+```
+
+## Difference in difference
+### Tottenham Hotspurs
+```{r}
+library(dplyr)
+
+data_spurs <- data %>%
+  filter(season %in% c("2015-2016", "2016-2017", "2017-2018"))
+
+data_spurs <- data_spurs %>%
+  mutate(
+    treat = if_else(home_team == "Tottenham Hotspur" | away_team == "Tottenham Hotspur", 1, 0),
+    post  = if_else(season == "2017-2018", 1, 0)
+  )
+
+did_mod <- lm((home_goals - away_goals) ~ treat + post + treat:post, data = data_spurs)
+summary(did_mod)
+
+
+```
+
+### Liverpool
+```{r}
+library(dplyr)
+
+data_liv <- data %>%
+  # Keep only the four relevant seasons
+  filter(season %in% c("2014-2015", "2015-2016", "2016-2017", "2017-2018")) %>%
+  
+  # Mark Liverpool as treated (either as home team or away team if you want both),
+  # but here we'll mirror the earlier approach and only mark "home_team" == "Liverpool".
+  mutate(
+    treat = if_else(home_team == "Liverpool", 1, 0),
+    
+    # post = 1 for 2016-17 and 2017-18 (the period after the attendance jump),
+    # 0 for 2014-15 and 2015-16
+    post = if_else(season %in% c("2016-2017", "2017-2018"), 1, 0),
+    
+    # Our outcome variable: goal difference from the home team's perspective
+    goal_diff = home_goals - away_goals
+  )
+
+did_mod_liv <- lm(goal_diff ~ treat + post + treat:post, data = data_liv)
+summary(did_mod_liv)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Ab Hier nehme ich stand jetzt nicht mit in die Präsentation
+## Regression approach – Home win as a binary variable
+```{r}
+# Create a binary variable: Hwin = 1 for a home win, otherwise 0
 data <- data %>%
   mutate(Hwin = if_else(result == "H", 1, 0))
 
-# Logistisches Modell
+# Logistic Modell
 mod_logit <- glm(Hwin ~ home_average_attendance,
                  data = data,
                  family = binomial(link = "logit"))
@@ -177,7 +275,7 @@ mod_logit <- glm(Hwin ~ home_average_attendance,
 summary(mod_logit)
 
 ```
-## Visualisierung
+## Visualization
 ```{r}
 library(ggplot2)
 
@@ -199,4 +297,6 @@ data %>%
   labs(x = "Attendance Group", y = "Goal Difference")
 
 ```
+
+
 
