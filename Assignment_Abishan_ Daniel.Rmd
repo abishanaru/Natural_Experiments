@@ -245,12 +245,75 @@ summary(did_mod_liv)
 
 ```
 
+### Man City
+
+```{r}
+library(dplyr)
+
+data_mc <- data %>%
+  # Keep only the two seasons of interest
+  filter(season %in% c("2014-2015", "2015-2016")) %>%
+  mutate(
+    treat = if_else(home_team == "Manchester City", 1, 0),
+    post  = if_else(season == "2015-2016", 1, 0),
+    goal_diff = home_goals - away_goals
+  )
+
+did_mod_mc <- lm(goal_diff ~ treat + post + treat:post, data = data_mc)
+summary(did_mod_mc)
+
+```
 
 
+### West Ham
 
+```{r}
+library(dplyr)
 
+data_wh <- data %>%
+  # 1) Filter for the relevant seasons
+  filter(season %in% c("2014-2015", "2015-2016", "2016-2017", "2017-2018")) %>%
+  
+  # 2) Create treat, post, and the outcome variable
+  mutate(
+    treat = if_else(home_team == "West Ham United", 1, 0),
+    post  = if_else(season %in% c("2016-2017", "2017-2018"), 1, 0),
+    goal_diff = home_goals - away_goals
+  )
 
+did_mod_wh <- lm(goal_diff ~ treat + post + treat:post, data = data_wh)
+summary(did_mod_wh)
 
+```
+
+## Attendancies for these 4 teams
+```{r}
+library(dplyr)
+library(tidyr)
+
+# Define the teams and seasons of interest
+teams_of_interest <- c("Tottenham Hotspur", "Liverpool", 
+                       "Manchester City", "West Ham United")
+seasons_of_interest <- c("2013-2014", "2014-2015", "2015-2016", 
+                         "2016-2017", "2017-2018")
+
+# 1) Filter to the teams & seasons you want
+# 2) Group by season & home_team
+# 3) Summarize average attendance (ignoring NA values)
+# 4) Pivot wider so each team is a separate column
+# 5) Arrange by season for a nice chronological table
+attendance_summary <- data %>%
+  filter(home_team %in% teams_of_interest,
+         season %in% seasons_of_interest) %>%
+  group_by(season, home_team) %>%
+  summarise(avg_home_attendance = mean(home_average_attendance, na.rm = TRUE),
+            .groups = "drop") %>%
+  pivot_wider(names_from = home_team, values_from = avg_home_attendance) %>%
+  arrange(season)
+
+attendance_summary
+
+```
 
 
 
