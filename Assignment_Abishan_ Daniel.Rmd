@@ -15,6 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(readr)
 data <- read.csv("results.csv")
+premier_league_2024 = read.csv("premier league.csv")
 library(readxl)
 attendance <- read_excel("C:/DB/01 HSLU/01 Semester/Natural Experiments Using R/_PROJECT/Attendance.xlsx")
 
@@ -52,130 +53,109 @@ data <- data %>%
 ## Analysis
 ### Abishan
 ```{r}
-library(dplyr)
-library(tidyr)
-
-# Example: Reshape to long format
-data_long <- data %>%
-  mutate(match_id = row_number()) %>%  # ensure each row (match) has a unique ID
-  select(match_id, season, home_team, away_team, home_goals, away_goals, result) %>%
-  # Reshape so we get one row per "team match":
-  pivot_longer(
-    cols = c("home_team", "away_team"),
-    names_to = "home_away",
-    values_to = "team"
-  ) %>%
-  # For goals, we have to pivot the same way or join them carefully:
-  mutate(
-    goals_for = ifelse(home_away == "home_team", home_goals, away_goals),
-    goals_against = ifelse(home_away == "home_team", away_goals, home_goals),
-    # Compute match result from perspective of "team":
-    team_result = case_when(
-      goals_for > goals_against ~ "W",
-      goals_for < goals_against ~ "L",
-      TRUE                      ~ "D"
-    ),
-    home_away = ifelse(home_away == "home_team", "H", "A")
-  ) %>%
-  select(match_id, season, team, home_away, goals_for, goals_against, team_result)
-
-# Sort by season and match_id (assuming match_id is chronological; if not, use actual date)
-data_long <- data_long %>%
-  arrange(team, season, match_id)
-
-# Now, for each team, compute the 'win_streak_before_match':
-data_long <- data_long %>%
-  group_by(team) %>%
-  mutate(
-    # For each row, check if the previous match was a win, if so add 1, otherwise reset
-    win_streak_before = {
-      streak <- numeric(n())
-      streak[1] <- 0  # first match has no "before" streak
-      for(i in 2:n()) {
-        if(team_result[i-1] == "W") {
-          streak[i] <- streak[i-1] + 1
-        } else {
-          streak[i] <- 0
-        }
-      }
-      streak
-    },
-    # Similarly for a losing streak
-    lose_streak_before = {
-      streak <- numeric(n())
-      streak[1] <- 0
-      for(i in 2:n()) {
-        if(team_result[i-1] == "L") {
-          streak[i] <- streak[i-1] + 1
-        } else {
-          streak[i] <- 0
-        }
-      }
-      streak
+compute_streaks <- function(results) {
+  n <- length(results)
+  win_streak <- numeric(n)
+  lose_streak <- numeric(n)
+  
+  win_count <- 0
+  lose_count <- 0
+  
+  for (i in seq_along(results)) {
+    # Record streaks before the current match:
+    win_streak[i] <- win_count
+    lose_streak[i] <- lose_count
+    
+    # Update counts based on current match result:
+    if(results[i] == "W"){
+      win_count <- win_count + 1
+      lose_count <- 0
+    } else if(results[i] == "L"){
+      lose_count <- lose_count + 1
+      win_count <- 0
+    } else {  # Assuming draws reset both streaks:
+      win_count <- 0
+      lose_count <- 0
     }
+  }
+  return(data.frame(win_streak_before = win_streak,
+                    lose_streak_before = lose_streak))
+}
+
+# Compute streaks for your team:
+streaks_team <- compute_streaks(premier_league_2024$Result)
+premier_league_2024 <- bind_cols(premier_league_2024, streaks_team)
+
+# Compute opponent's streaks (if desired) using their results:
+streaks_opp <- compute_streaks(premier_league_2024$opponent_result)
+premier_league_2024 <- premier_league_2024 %>%
+  rename(win_streak_opp = win_streak_before,
+         lose_streak_opp = lose_streak_before) %>%
+  bind_cols(streaks_opp)
+
+```
+
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+# First, add the opponent's result based on your team's result:
+premier_league_2024 <- premier_league_2024 %>%
+  mutate(opponent_result = case_when(
+    Result == "W" ~ "L",
+    Result == "L" ~ "W",
+    TRUE         ~ "D"
+  ))
+
+# Pivot the dataset so that each match appears twice.
+# For your team ("Team") and the opponent ("Opponent"), assign the correct result and venue.
+premier_long <- premier_league_2024 %>%
+  pivot_longer(
+    cols = c(Team, Opponent),
+    names_to = "side",
+    values_to = "club"
   ) %>%
+  mutate(
+    # If the row comes from the Team column, the result is as recorded.
+    # If it comes from the Opponent column, use the computed opponent_result.
+    result = if_else(side == "Team", Result, opponent_result),
+    # Switch venue for the opponent: if your team is Home, then for the opponent it’s Away, and vice versa.
+    venue = if_else(side == "Team", Venue, if_else(Venue == "Home", "Away", "Home"))
+  ) %>%
+  arrange(club, Date)
+
+# Now, for each club, compute streaks over time:
+premier_long <- premier_long %>%
+  group_by(club) %>%
+  arrange(Date) %>%
+  mutate(
+    streaks = list(compute_streaks(result))
+  ) %>%
+  unnest(cols = c(streaks), names_sep = "_")%>%
   ungroup()
 
 ```
-```{r}
-library(ggplot2)
-
-ggplot(data_long, aes(x = win_streak_before)) +
-  geom_bar() +
-  theme_minimal() +
-  labs(
-    title = "Distribution of Win Streaks Before a Match",
-    x = "Win Streak Length",
-    y = "Count"
-  )
-
-```
 
 ```{r}
-data_long %>%
-  group_by(win_streak_before) %>%
-  summarise(prob_win = mean(team_result == "W")) %>%
-  ggplot(aes(x = win_streak_before, y = prob_win)) +
-  geom_line() +
-  geom_point() +
-  theme_minimal() +
-  labs(
-    title = "Win Probability vs. Previous Win Streak",
-    x = "Win Streak Before Current Match",
-    y = "Probability of Win (Current Match)"
-  )
-
-```
-
-
-```{r}
-# Create a binary outcome (1 if team_result == "W", 0 otherwise):
-data_long <- data_long %>%
-  mutate(win_current = ifelse(team_result == "W", 1, 0))
-
-# Fit a logistic regression predicting the odds of winning:
-model <- glm(
-  win_current ~ win_streak_before + lose_streak_before + home_away,
-  data = data_long,
+model_long <- glm(
+  as.numeric(result == "W") ~ streaks_win_streak_before + streaks_lose_streak_before + venue,
+  data = premier_long,
   family = binomial(link = "logit")
 )
+summary(model_long)
 
-summary(model)
 
 ```
+## Logistisches Regressionsmodell
 
+Wir haben ein logistisches Regressionsmodell geschätzt, um den Einfluss von Gewinn- und Verlustserien sowie des Spielorts (Heim/Auswärts) auf die Wahrscheinlichkeit eines Sieges zu untersuchen. Die Modellformel lautet:
 
-```{r}
-# Mixed model with random intercept by team:
-library(lme4)
-model_mixed <- glmer(
-  win_current ~ win_streak_before + home_away + (1 | team),
-  data = data_long,
-  family = binomial
-)
-summary(model_mixed)
+$$
+\log\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 \cdot \texttt{streaks\_win\_streak\_before} + \beta_2 \cdot \texttt{streaks\_lose\_streak\_before} + \beta_3 \cdot \texttt{venueHome}
+$$
 
-```
+wobei \( p \) die Wahrscheinlichkeit eines Sieges darstellt.
 
 ### Daniel
 ## Analysis home advantage over all seasons
