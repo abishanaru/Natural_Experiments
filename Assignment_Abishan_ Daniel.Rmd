@@ -17,7 +17,7 @@ library(readr)
 data <- read.csv("results.csv")
 premier_league_2024 = read.csv("premier league.csv")
 library(readxl)
-attendance <- read_excel("C:/DB/01 HSLU/01 Semester/Natural Experiments Using R/_PROJECT/Attendance.xlsx")
+attendance <- read_excel("Attendance.xlsx")
 
 ```
 
@@ -52,101 +52,152 @@ data <- data %>%
 
 ## Analysis
 ### Abishan
+We have decided to conduct an analysis on the Premier League data for the 2024 season. We will be looking at the performance of a specific team and their opponents in terms of win and loss streaks. This analysis will help us understand the momentum of the teams and how it might affect the outcome of future matches. We will also investigate the impact of the venue (home or away) on the team's performance.
+
+Here for we used the data set only from the season 2024, because this was the only dataset we found with the necessary information.
 ```{r}
-compute_streaks <- function(results) {
-  n <- length(results)
-  win_streak <- numeric(n)
-  lose_streak <- numeric(n)
-  
-  win_count <- 0
-  lose_count <- 0
-  
-  for (i in seq_along(results)) {
-    # Record streaks before the current match:
-    win_streak[i] <- win_count
-    lose_streak[i] <- lose_count
-    
-    # Update counts based on current match result:
-    if(results[i] == "W"){
-      win_count <- win_count + 1
-      lose_count <- 0
-    } else if(results[i] == "L"){
-      lose_count <- lose_count + 1
-      win_count <- 0
-    } else {  # Assuming draws reset both streaks:
-      win_count <- 0
-      lose_count <- 0
-    }
-  }
-  return(data.frame(win_streak_before = win_streak,
-                    lose_streak_before = lose_streak))
-}
+# Sort the data by date
+premier_league <- premier_league_2024[order(premier_league_2024$Date),]
 
-# Compute streaks for your team:
-streaks_team <- compute_streaks(premier_league_2024$Result)
-premier_league_2024 <- bind_cols(premier_league_2024, streaks_team)
-
-# Compute opponent's streaks (if desired) using their results:
-streaks_opp <- compute_streaks(premier_league_2024$opponent_result)
-premier_league_2024 <- premier_league_2024 %>%
-  rename(win_streak_opp = win_streak_before,
-         lose_streak_opp = lose_streak_before) %>%
-  bind_cols(streaks_opp)
+str(premier_league)
 
 ```
 
+### Interpretation
+The model starts at a baseline win probability of 0.299387 when the team is playing away (is_home = 0), with no win or lose streaks. The coefficients for the is_home variable, win_streak, and lose_streak represent the change in win probability associated with each unit increase in the respective variable, holding other variables constant.
 
 ```{r}
-library(tidyr)
+# Load required libraries
 library(dplyr)
+library(tidyr)
+library(stats)
+library(ggplot2)
+library(gridExtra)
 
-# First, add the opponent's result based on your team's result:
-premier_league_2024 <- premier_league_2024 %>%
-  mutate(opponent_result = case_when(
-    Result == "W" ~ "L",
-    Result == "L" ~ "W",
-    TRUE         ~ "D"
-  ))
+# Create team results dataframe
+team_results <- premier_league %>%
+  select(Date, Team, Opponent, Result, Venue) %>%
+  mutate(Date = as.Date(Date))
 
-# Pivot the dataset so that each match appears twice.
-# For your team ("Team") and the opponent ("Opponent"), assign the correct result and venue.
-premier_long <- premier_league_2024 %>%
-  pivot_longer(
-    cols = c(Team, Opponent),
-    names_to = "side",
-    values_to = "club"
-  ) %>%
+# Create opponent results dataframe with flipped outcomes
+opponent_results <- premier_league %>%
+  select(Date, Team, Opponent, Result, Venue) %>%
   mutate(
-    # If the row comes from the Team column, the result is as recorded.
-    # If it comes from the Opponent column, use the computed opponent_result.
-    result = if_else(side == "Team", Result, opponent_result),
-    # Switch venue for the opponent: if your team is Home, then for the opponent it’s Away, and vice versa.
-    venue = if_else(side == "Team", Venue, if_else(Venue == "Home", "Away", "Home"))
+    Result = case_when(
+      Result == "W" ~ "L",
+      Result == "L" ~ "W",
+      Result == "D" ~ "D"
+    ),
+    temp = Team,
+    Team = Opponent,
+    Opponent = temp,
+    Venue = ifelse(Venue == "Home", "Away", "Home"),
+    Date = as.Date(Date)
   ) %>%
-  arrange(club, Date)
+  select(-temp)
 
-# Now, for each club, compute streaks over time:
-premier_long <- premier_long %>%
-  group_by(club) %>%
+# Combine and calculate streaks
+all_results <- rbind(team_results, opponent_results) %>%
+  arrange(Date, Team) %>%
+  group_by(Team) %>%
   arrange(Date) %>%
   mutate(
-    streaks = list(compute_streaks(result))
+    win_streak = cumsum(Result == "W") - cumsum(Result != "W" & lag(Result == "W", default = FALSE)),
+    lose_streak = cumsum(Result == "L") - cumsum(Result != "L" & lag(Result == "L", default = FALSE))
   ) %>%
-  unnest(cols = c(streaks), names_sep = "_")%>%
   ungroup()
 
-```
+# Prepare modeling data
+model_data <- all_results %>%
+  mutate(
+    win = ifelse(Result == "W", 1, 0),
+    is_home = ifelse(Venue == "Home", 1, 0)
+  ) %>%
+  select(win, is_home, win_streak, lose_streak)
 
-```{r}
-model_long <- glm(
-  as.numeric(result == "W") ~ streaks_win_streak_before + streaks_lose_streak_before + venue,
-  data = premier_long,
-  family = binomial(link = "logit")
+# Fit linear regression model
+model <- lm(win ~ is_home + win_streak + lose_streak, data = model_data)
+correlation_matrix <- cor(model_data)
+
+# Create visualization plots
+venue_plot <- ggplot(model_data, aes(x = factor(is_home), y = win)) +
+  geom_bar(stat = "summary", fun = "mean", fill = "skyblue") +
+  geom_errorbar(stat = "summary", fun.data = "mean_se", width = 0.2) +
+  scale_x_discrete(labels = c("Away", "Home")) +
+  labs(x = "Venue", y = "Win Probability", title = "Win Probability by Venue") +
+  theme_minimal()
+
+win_streak_plot <- ggplot(model_data, aes(x = win_streak, y = win)) +
+  geom_smooth(method = "loess", se = TRUE, color = "blue") +
+  geom_jitter(alpha = 0.1, height = 0.05) +
+  labs(x = "Win Streak", y = "Win Probability", title = "Win Probability by Win Streak") +
+  theme_minimal()
+
+lose_streak_plot <- ggplot(model_data, aes(x = lose_streak, y = win)) +
+  geom_smooth(method = "loess", se = TRUE, color = "red") +
+  geom_jitter(alpha = 0.1, height = 0.05) +
+  labs(x = "Lose Streak", y = "Win Probability", title = "Win Probability by Lose Streak") +
+  theme_minimal()
+
+coef_data <- data.frame(
+  variable = names(coef(model))[-1],
+  coefficient = coef(model)[-1],
+  se = summary(model)$coefficients[-1, "Std. Error"]
 )
-summary(model_long)
 
+coef_plot <- ggplot(coef_data, aes(x = variable, y = coefficient)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  geom_errorbar(aes(ymin = coefficient - 1.96 * se, 
+                    ymax = coefficient + 1.96 * se), 
+                width = 0.2) +
+  labs(x = "Variables", y = "Coefficient Value", 
+       title = "Model Coefficients with 95% CI") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
+# Combine and display all plots
+combined_plots <- grid.arrange(
+  venue_plot, win_streak_plot, 
+  lose_streak_plot, coef_plot,
+  ncol = 2
+)
+
+# Print results
+print(summary(model))
+print(correlation_matrix)
+print(combined_plots)
 ```
+Let me help analyze these results:
+
+1. From the correlation matrix:
+- Home advantage has a small positive correlation with winning (0.14)
+- Win streaks have a moderate positive correlation with winning (0.28)
+- Losing streaks have a negative correlation with winning (-0.19)
+- There's very little correlation between streaks and home/away games
+- Win and lose streaks have a small positive correlation (0.11)
+
+2. From the linear regression model:
+- All variables are highly significant (p < 2e-16)
+- The coefficients show:
+  * Base win probability (intercept): 0.30 or 30%
+  * Home advantage adds 0.13 or 13% to win probability
+  * Each additional win in a streak adds 0.019 or 1.9%
+  * Each additional loss in a streak reduces chances by 0.015 or 1.5%
+- The model explains about 14.5% of the variance (Adjusted R-squared: 0.1446)
+- The F-statistic (86.62) with a very low p-value indicates the model is significant
+
+3. There seem to be two models in your output:
+- A linear regression (lm)
+- A logistic regression (glm)
+The logistic regression shows similar patterns but with different magnitudes:
+- Home advantage: 0.59 log-odds (larger effect)
+- Win streak: 0.13 log-odds (positive effect)
+- Lose streak: -0.13 log-odds (negative effect)
+
+4. There are some errors in the output suggesting missing data:
+- An Excel file with attendance data couldn't be found
+- The 'attendance' object is missing
+
 ## Logistisches Regressionsmodell
 
 Wir haben ein logistisches Regressionsmodell geschätzt, um den Einfluss von Gewinn- und Verlustserien sowie des Spielorts (Heim/Auswärts) auf die Wahrscheinlichkeit eines Sieges zu untersuchen. Die Modellformel lautet:
@@ -156,6 +207,8 @@ $$
 $$
 
 wobei \( p \) die Wahrscheinlichkeit eines Sieges darstellt.
+
+
 
 ### Daniel
 ## Analysis home advantage over all seasons
