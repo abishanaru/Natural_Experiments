@@ -2,7 +2,11 @@
 title: "Natural Experiments"
 author: "Abishan Arumugavel and Daniel Beeler"
 date: "`r Sys.Date()`"
-output: html_document
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
 ---
 
 ```{r setup, include=FALSE}
@@ -27,9 +31,8 @@ data <- read.csv("results.csv")
 attendance <- read_excel("Attendance.xlsx")
 
 # Premier League data of the 2024 season
-# We us additionaly this dataset, because this data set has more information concerning each match.
+# We us additionaly this dataset, because this data set has more information concerning each match of the season.
 premier_league_2024 = read.csv("premier league.csv")
-
 ```
 
 ## Data Cleaning
@@ -63,24 +66,18 @@ data <- data %>%
 
 
 ## Analysis
-### Abishan
-We have decided to conduct an analysis on the Premier League data for the 2024 season. We will be looking at the performance of a specific team and their opponents in terms of win and loss streaks. This analysis will help us understand the momentum of the teams and how it might affect the outcome of future matches. We will also investigate the impact of the venue (home or away) on the team's performance.
+### Analysis of win and loss streaks on the wining probability of a team
+We have decided to conduct an analysis on the Premier League data for the 2024 season. We will be looking at the performance of each teams and their opponents in terms of win and loss streaks. This analysis will help us understand the momentum of the teams and how it might affect the outcome of future matches. We will also investigate the impact of the venue (home or away) on the team's performance.
 
 Here for we used the data set only from the season 2024, because this was the only dataset we found with the necessary information.
 ```{r}
 # Sort the data by date
 premier_league <- premier_league_2024[order(premier_league_2024$Date),]
-
-str(premier_league)
-
 ```
 
-### Interpretation
-The model starts at a baseline win probability of 0.299387 when the team is playing away (is_home = 0), with no win or lose streaks. The coefficients for the is_home variable, win_streak, and lose_streak represent the change in win probability associated with each unit increase in the respective variable, holding other variables constant.
 
 ```{r}
 # Load required libraries
-library(dplyr)
 library(tidyr)
 library(stats)
 library(ggplot2)
@@ -92,6 +89,7 @@ team_results <- premier_league %>%
   mutate(Date = as.Date(Date))
 
 # Create opponent results dataframe with flipped outcomes
+# Here we need to also take in account that when one team wins, the other team loses and vice versa.
 opponent_results <- premier_league %>%
   select(Date, Team, Opponent, Result, Venue) %>%
   mutate(
@@ -103,6 +101,7 @@ opponent_results <- premier_league %>%
     temp = Team,
     Team = Opponent,
     Opponent = temp,
+    # The same goes for the venue, if one team plays at home, the other team plays away.
     Venue = ifelse(Venue == "Home", "Away", "Home"),
     Date = as.Date(Date)
   ) %>%
@@ -126,11 +125,77 @@ model_data <- all_results %>%
     is_home = ifelse(Venue == "Home", 1, 0)
   ) %>%
   select(win, is_home, win_streak, lose_streak)
+```
 
+In this section, we fit a linear regression model to investigate how a team’s winning probability (win) is influenced by the following predictors:
+- is_home: A binary indicator of whether the team is playing at home (1 = home, 0 = away)
+- win_streak: The number of consecutive wins the team has before the current match.
+- lose_streak: The number of consecutive losses the team has before the current match.
+
+Although win is a binary outcome (0/1), we are here treating it with a linear model to get a quick and interpretable assessment of how these factors correlate with the team’s chance of winning. This model allows us to estimate a continuous outcome (predicted win probability) on a 0–1 scale, even though a logistic regression might be more common for binary data. Nonetheless, the linear approach is acceptable for exploratory analysis or illustrative purposes.
+
+Our linear model is of the form:
+$$
+\hat{y} = \beta_0 
++ \beta_1 \cdot \texttt{is_home} 
++ \beta_2 \cdot \texttt{win_streak} 
++ \beta_3 \cdot \texttt{lose_streak},
+$$
+
+where:
+
+- $\hat{y}$ s the predicted value of win (interpreted here as a proxy for the probability of winning).
+- $\beta_0$ is the intercept (baseline outcome when all predictors are zero).
+- $\beta_1$, $\beta_2$, and $\beta_3$ are the coefficients for the home venue, the current win streak, and the current loss streak, respectively.
+
+```{r}
 # Fit linear regression model
 model <- lm(win ~ is_home + win_streak + lose_streak, data = model_data)
+
+
+# Print results
+print(summary(model))
+```
+#### Model Summary Interpretation
+- **Intercept** ($\beta_0$ ≈ 0.299387)
+  * This indicates the model’s baseline prediction when is_home = 0, win_streak = 0, and lose_streak = 0. A value of 0.299 suggests that, in the absence of other effects, a team has a predicted win rate (or probability) of about 29.9%.
+- **is_home** ($\beta_1$ ≈ 0.131108)
+  * A positive coefficient indicates that playing at home is associated with a higher likelihood of winning. Holding all else constant, being the home team increases the predicted win value by approximately 0.131. This effect is both positive and statistically significant (𝑝 < 0.001).
+- **win_streak** ($\beta_2$ ≈ 0.018663)
+  * This coefficient suggests that for each additional game in the current winning streak, the predicted win probability increases by about 0.019. This effect is also highly significant (𝑝 < 0.001), which aligns with the idea that teams on a winning streak tend to continue winning.
+- **lose_streak** ($\beta_3$ ≈ -0.014855)  
+  * A negative coefficient implies that for each additional game in the current losing streak, the predicted win probability decreases by about 0.015. This is likewise statistically significant (𝑝 < 0.001) and suggests that teams on a losing streak are somewhat less likely to win their next match.
+
+**Model Fit:**
+- **Multiple R-squared** = 0.1463 (Adjusted R-squared: 0.1446)
+  * About 14.6% of the variation in the win variable is explained by these three predictors. While this indicates that the model leaves a good deal of variation unexplained (which is common in sports outcomes), the predictors do have a meaningful, statistically significant relationship with winning.
+
+
+```{r}
+# Calculate correlation matrix
 correlation_matrix <- cor(model_data)
 
+# Print correlation matrix
+print(correlation_matrix)
+```
+
+The correlation matrix shows the pairwise linear relationships between win, is_home, win_streak, and lose_streak:
+
+- **win and is_home:** A moderate positive correlation (0.14) implies that teams playing at home tend to win slightly more often.
+- **win and win_streak:** A correlation of 0.28 indicates a positive relationship; the longer the current winning streak, the higher the chance of winning again.
+- **win and lose_streak:** A correlation of about -0.19 indicates a negative relationship; the longer the current losing streak, the lower the chance of winning.
+- **is_home with win_streak and lose_streak:** These correlations are near zero, suggesting that playing at home is relatively independent of a team’s current winning or losing streak in this dataset.
+
+### Conclusion of the first Analysis
+From this linear model, we see that venue (is_home), win streak, and lose streak each play an important role in predicting the likelihood of winning a match. The positive and negative coefficients for these predictors make intuitive sense:
+- **Home Advantage** – Slight increase in win probability.
+- **Winning Momentum** – Each consecutive win boosts chances for the next match.
+- **Losing Momentum** – Each consecutive loss decreases chances for the next match.
+
+Although the model explains only a modest portion of the variance in outcomes, it provides useful insights into how these factors correlate with a team’s probability of winning.
+
+#### Visualization
+```{r}
 # Create visualization plots
 venue_plot <- ggplot(model_data, aes(x = factor(is_home), y = win)) +
   geom_bar(stat = "summary", fun = "mean", fill = "skyblue") +
@@ -175,59 +240,13 @@ combined_plots <- grid.arrange(
 )
 
 # Print results
-print(summary(model))
-print(correlation_matrix)
 print(combined_plots)
 ```
-Let me help analyze these results:
-
-1. From the correlation matrix:
-- Home advantage has a small positive correlation with winning (0.14)
-- Win streaks have a moderate positive correlation with winning (0.28)
-- Losing streaks have a negative correlation with winning (-0.19)
-- There's very little correlation between streaks and home/away games
-- Win and lose streaks have a small positive correlation (0.11)
-
-2. From the linear regression model:
-- All variables are highly significant (p < 2e-16)
-- The coefficients show:
-  * Base win probability (intercept): 0.30 or 30%
-  * Home advantage adds 0.13 or 13% to win probability
-  * Each additional win in a streak adds 0.019 or 1.9%
-  * Each additional loss in a streak reduces chances by 0.015 or 1.5%
-- The model explains about 14.5% of the variance (Adjusted R-squared: 0.1446)
-- The F-statistic (86.62) with a very low p-value indicates the model is significant
-
-3. There seem to be two models in your output:
-- A linear regression (lm)
-- A logistic regression (glm)
-The logistic regression shows similar patterns but with different magnitudes:
-- Home advantage: 0.59 log-odds (larger effect)
-- Win streak: 0.13 log-odds (positive effect)
-- Lose streak: -0.13 log-odds (negative effect)
-
-4. There are some errors in the output suggesting missing data:
-- An Excel file with attendance data couldn't be found
-- The 'attendance' object is missing
-
-## Logistisches Regressionsmodell
-
-Wir haben ein logistisches Regressionsmodell geschätzt, um den Einfluss von Gewinn- und Verlustserien sowie des Spielorts (Heim/Auswärts) auf die Wahrscheinlichkeit eines Sieges zu untersuchen. Die Modellformel lautet:
-
-$$
-\log\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 \cdot \texttt{streaks\_win\_streak\_before} + \beta_2 \cdot \texttt{streaks\_lose\_streak\_before} + \beta_3 \cdot \texttt{venueHome}
-$$
-
-wobei \( p \) die Wahrscheinlichkeit eines Sieges darstellt.
 
 
-
-### Daniel
-## Analysis home advantage over all seasons
+### Analysis of the home advantage over all seasons
 
 ```{r}
-library(dplyr)
-
 data_summary <- data %>%
   group_by(season) %>%
   summarise(
@@ -245,10 +264,6 @@ data_summary <- data %>%
   )
 
 data_summary
-
-library(dplyr)
-library(tidyr)
-library(ggplot2)
 
 # 1) Keep only the relevant columns and reshape the data to long format
 data_summary_long <- data_summary %>%
@@ -282,8 +297,6 @@ We clearly see that the home team wins far more games then the away team. This c
 
 ## Grouped analysis by attendancies
 ```{r}
-library(dplyr)
-library(ggplot2)
 data %>%
   mutate(
     attendance_group = case_when(
@@ -355,8 +368,6 @@ We calculated a correlation between goals with attendance of 0.26 and points wit
 
 ## look for teams whos attendance changed drastically
 ```{r}
-library(dplyr)
-
 df_changes <- data %>%
   # 1) Group by team
   group_by(home_team) %>%
@@ -382,8 +393,6 @@ As we have a confounder, we looked through our dataset to find teams whos season
 ## Difference in difference
 ### Tottenham Hotspurs
 ```{r}
-library(dplyr)
-
 data_spurs <- data %>%
   filter(season %in% c("2015-2016", "2016-2017", "2017-2018"))
 
@@ -401,8 +410,6 @@ summary(did_mod)
 
 ### Liverpool
 ```{r}
-library(dplyr)
-
 data_liv <- data %>%
   # Keep only the four relevant seasons
   filter(season %in% c("2014-2015", "2015-2016", "2016-2017", "2017-2018")) %>%
@@ -428,8 +435,6 @@ summary(did_mod_liv)
 ### Man City
 
 ```{r}
-library(dplyr)
-
 data_mc <- data %>%
   # Keep only the two seasons of interest
   filter(season %in% c("2014-2015", "2015-2016")) %>%
@@ -448,8 +453,6 @@ summary(did_mod_mc)
 ### West Ham
 
 ```{r}
-library(dplyr)
-
 data_wh <- data %>%
   # 1) Filter for the relevant seasons
   filter(season %in% c("2014-2015", "2015-2016", "2016-2017", "2017-2018")) %>%
@@ -471,9 +474,6 @@ For two teams we found a significant impact on attendance on the average goal-di
 
 ## Attendancies for these 4 teams
 ```{r}
-library(dplyr)
-library(tidyr)
-
 # Define the teams and seasons of interest
 teams_of_interest <- c("Tottenham Hotspur", "Liverpool", 
                        "Manchester City", "West Ham United")
