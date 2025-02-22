@@ -73,6 +73,7 @@ Here for we used the data set only from the season 2024, because this was the on
 ```{r}
 # Sort the data by date
 premier_league <- premier_league_2024[order(premier_league_2024$Date),]
+head(premier_league)
 ```
 
 
@@ -151,7 +152,6 @@ where:
 ```{r}
 # Fit linear regression model
 model <- lm(win ~ is_home + win_streak + lose_streak, data = model_data)
-
 
 # Print results
 print(summary(model))
