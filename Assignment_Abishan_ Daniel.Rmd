@@ -9,16 +9,26 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Title 1
+# Analysis of variables correlating with the home win percentage in the English Premier League
+
+## Introduction
+In this analysis, we aim to investigate the factors that correlate with the home win percentage in the English Premier League. We will explore various variables such as attendance, goal difference, and win/loss streaks to understand their impact on the likelihood of a home team winning a match. By analyzing historical data from the Premier League, we can gain insights into the key drivers of home team success and identify patterns that may influence match outcomes.
 
 ## Importing Data
 Here we import the relevant dataset into our project.
 ```{r}
 library(readr)
-data <- read.csv("results.csv")
-premier_league_2024 = read.csv("premier league.csv")
 library(readxl)
+
+# Premier League data from 2006 to 2018
+data <- read.csv("results.csv")
+
+# Attendance rates from 2006 to 2018
 attendance <- read_excel("Attendance.xlsx")
+
+# Premier League data of the 2024 season
+# We us additionaly this dataset, because this data set has more information concerning each match.
+premier_league_2024 = read.csv("premier league.csv")
 
 ```
 
