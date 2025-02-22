@@ -139,7 +139,7 @@ $$
 \hat{y} = \beta_0 
 + \beta_1 \cdot \texttt{is_home} 
 + \beta_2 \cdot \texttt{win_streak} 
-+ \beta_3 \cdot \texttt{lose_streak},
++ \beta_3 \cdot \texttt{lose_streak}
 $$
 
 where:
