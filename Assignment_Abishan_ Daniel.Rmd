@@ -501,5 +501,6 @@ attendance_summary
 Interpretation:
 Here I just wanted to have a table, which I can copy on the presentation, for which we see how and when the attendance changes.
 
-
+## Conclusion
+Our analysis suggests that playing at home does indeed confer a measurable advantage, supporting the long-held notion of “home field advantage.” However, we cannot attribute this effect solely to higher attendance or fan support, as many other variables are likely at play. Furthermore, predicting a team’s chance of winning in sports remains challenging due to the multitude of factors—both on and off the field—that can influence a match outcome. To achieve a more precise estimation of winning probabilities, additional features would need to be incorporated into the model, such as measures of each team’s season-long strength. Yet even that alone poses its own challenges, given how difficult it can be to define and quantify a team’s true “strength” over time.
 
